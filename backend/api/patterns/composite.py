@@ -6,6 +6,26 @@ class SearchCriteria(ABC):
     PATRÓN COMPOSITE
     Componente base para criterios de búsqueda
     Permite construir filtros complejos y anidados
+    
+    Mejoras en Escalabilidad, Interoperabilidad y UX
+
+    ESCALABILIDAD: Permite construir filtros de búsqueda complejos mediante composición jerárquica 
+    sin modificar código existente. Agregar nuevos criterios (ej: SecurityCriteria, CapacityCriteria) solo requiere 
+    crear una nueva clase que implemente SearchCriteria, y pueden combinarse infinitamente: 
+    (Disponible AND (Precio < 5000 OR Distancia < 2km)) AND Techado, escalando de filtros simples a sistemas de 
+    búsqueda avanzada sin refactorización.
+
+    INTEROPERABILIDAD: Proporciona interfaz uniforme (matches()) para todos los criterios independientemente de su 
+    complejidad o fuente de datos, permitiendo que criterios simples (AvailabilityCriteria consulta BD local) y 
+    complejos (DistanceCriteria usa GPS externo) trabajen juntos seamlessly. Los criterios compuestos tratan hojas 
+    y ramas de forma idéntica, facilitando integración con sistemas externos de filtrado, APIs de terceros o 
+    motores de búsqueda sin conocer detalles de implementación.
+
+    EXPERIENCIA DE USUARIO: Mejora UX al permitir búsquedas altamente personalizadas con sintaxis natural 
+    ("parqueaderos disponibles, cerca de mí y económicos" se traduce a CompositeCriteria AND con tres criterios), 
+    respuestas instantáneas mediante evaluación lazy (cortocircuito en operaciones AND/OR que evita cálculos 
+    innecesarios), y flexibilidad total donde usuarios pueden guardar filtros complejos como templates reutilizables, 
+    creando experiencia de búsqueda profesional comparable a plataformas enterprise sin complejidad en UI.
     """
     
     @abstractmethod

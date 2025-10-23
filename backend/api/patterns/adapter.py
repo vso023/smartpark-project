@@ -47,6 +47,24 @@ class GPSAdapter(IGPSService):
     PATRÓN ADAPTER
     Adapta la interfaz de Google Maps a nuestra interfaz estándar
     Permite cambiar de proveedor GPS sin afectar el resto del código
+    
+    Mejoras en Escalabilidad, Interoperabilidad y UX
+
+    ESCALABILIDAD: Permite agregar o cambiar proveedores de servicios GPS (Google Maps, MapBox, OpenStreetMap) 
+    sin modificar el código de la aplicación. Si necesitamos migrar de Google Maps a otro proveedor, solo 
+    modificamos el adapter (1 archivo) en lugar de refactorizar toda la aplicación, reduciendo 
+    el tiempo de integración.
+
+    INTEROPERABILIDAD: Unifica las interfaces incompatibles de múltiples servicios externos bajo una interfaz 
+    estándar (IGPSService), permitiendo que la aplicación trabaje con cualquier proveedor GPS sin conocer los 
+    detalles de implementación de cada uno. Cada servicio externo tiene métodos y formatos de respuesta diferentes 
+    (compute_distance_km, calculateDistance, getDistanceBetween), pero el adapter los traduce todos a get_distance() 
+    con formato consistente.
+
+    EXPERIENCIA DE USUARIO: Mejora la UX al implementar fallback automático entre servicios (si Google Maps falla, 
+    usa MapBox transparentemente), optimizar costos usando cálculos locales para distancias cortas y APIs pagas solo 
+    para largas (respuestas más rápidas), y garantizar formato consistente de datos que elimina errores de UI y 
+    proporciona experiencia predecible independientemente del proveedor GPS utilizado en backend.
     """
     
     def __init__(self, external_service=None):

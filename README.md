@@ -62,7 +62,11 @@ Este script inicia ambos servidores automáticamente en terminales separadas.
    python manage.py createsuperuser
    ```
 
-6. **Iniciar el servidor backend:**
+6. **Activar el entorno virtual:**
+   ```powershell
+   .\venv\Scripts\activate
+   ```
+7. **Iniciar el servidor backend:**
    ```powershell
    python manage.py runserver
    ```
@@ -83,7 +87,10 @@ Este script inicia ambos servidores automáticamente en terminales separadas.
    ```powershell
    npm install
    ```
-
+4. **Instalar componente Google Maps**
+   ```powershell
+   npm install google-maps
+   ```
 4. **(REQUERIDO) Configurar Google Maps API:**
    - **IMPORTANTE**: El programa necesita una API key de Google Maps para funcionar correctamente
    - Ver guía completa en: [GOOGLE_MAPS_SETUP.md](GOOGLE_MAPS_SETUP.md)

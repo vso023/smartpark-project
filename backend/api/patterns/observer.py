@@ -7,7 +7,32 @@ class ParkingAvailabilityObserver:
     PATRÓN OBSERVER
     Notifica a los suscriptores cuando cambia la disponibilidad de un parqueadero
     Útil para actualizaciones en tiempo real via WebSockets
+
+    ESCALABILIDAD:
+    - Permite distribuir actualizaciones a muchos clientes sin acoplarlos al origen del
+      cambio. El patrón Observer facilita el escalado de notificaciones (ej. múltiples
+      workers que emiten eventos a un broker) y la adición de nuevos suscriptores
+      (servicios de analytics, UI, logs) sin modificar el productor.
+    - Facilita la migración a infraestructuras más grandes (pub/sub, message brokers,
+      Redis Streams, Kafka) cuando la cantidad de suscriptores o la frecuencia de eventos
+      crece, manteniendo la misma interfaz de suscripción en el código de la aplicación.
+
+    INTEROPERABILIDAD:
+    - Normaliza la forma en que los eventos se notifican a distintos consumidores. Los
+      callbacks/subscriptores pueden ser funciones locales, adaptadores a WebSockets o
+      puentes a otros servicios; todos consumen el mismo formato de datos.
+    - Facilita integrar clientes heterogéneos (frontend, microservicios, herramientas de
+      monitoreo) porque el observable actúa como punto único que emite eventos en un
+      formato consistente.
+
+    EXPERIENCIA DE USUARIO (UX):
+    - Mejora la percepción de inmediatez al permitir actualizaciones en tiempo real en la
+      UI (p. ej. estado de disponibilidad) sin polling continuo. Menos latencia y menos
+      tráfico redundante mejora la respuesta percibida por el usuario.
+    - Permite enriquecimientos para UX como debouncing, batching o filtrado selectivo de
+      notificaciones para reducir ruido en la interfaz y priorizar eventos relevantes.
     """
+
     _instance = None
     _lock = threading.Lock()
 
