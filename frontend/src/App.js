@@ -1,5 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { MapPin, Navigation, Car, Clock, DollarSign, Loader, AlertCircle } from 'lucide-react';
+import APIService from './services/api';
+import GoogleMapsComponent from './components/GoogleMapsComponent';
+import './App.css';
 
 // PATRÓN OBSERVER: Simula las actualizaciones en tiempo real de disponibilidad
 class ParkingObserver {
@@ -62,9 +65,9 @@ class GPSAdapter {
   }
 
   getUserLocation() {
+    // Ya no modificamos la ubicación - usamos la seleccionada por el usuario
     const pos = this.externalGPSService.getCurrentPosition();
-    // Usuario comienza en esquina inferior izquierda
-    return { lat: pos.latitude - 0.015, lng: pos.longitude + 0.015 };
+    return { lat: pos.latitude, lng: pos.longitude };
   }
 
   generateRoute(from, to) {
@@ -141,8 +144,9 @@ class ParkingSearchFacade {
     this.gpsAdapter = new GPSAdapter();
   }
 
-  findNearestParking() {
-    const userLocation = this.gpsAdapter.getUserLocation();
+  findNearestParking(userLocation = null) {
+    // Si no se proporciona ubicación, usar la del GPS Adapter
+    const location = userLocation || this.gpsAdapter.getUserLocation();
     const parkings = this.dataManager.getAllParkings();
     
     // PATRÓN COMPOSITE: Filtros compuestos (disponible Y cercano)
@@ -152,15 +156,15 @@ class ParkingSearchFacade {
       return null;
     }
 
-    // Encuentra el más cercano
+    // Encuentra el más cercano basado en la ubicación proporcionada
     const nearest = availableParkings.reduce((closest, current) => {
       return current.distance < closest.distance ? current : closest;
     });
 
     return {
       parking: nearest,
-      userLocation: userLocation,
-      route: this.gpsAdapter.getRoute(userLocation, nearest)
+      userLocation: location,
+      route: this.gpsAdapter.getRoute(location, nearest)
     };
   }
 }
@@ -174,14 +178,14 @@ class ParkingSearchProxy {
     this.cacheDuration = 30000;
   }
 
-  findNearestParking() {
+  findNearestParking(userLocation = null) {
     const now = Date.now();
     
     if (this.cache && this.cacheTimestamp && (now - this.cacheTimestamp) < this.cacheDuration) {
       return this.cache;
     }
 
-    const result = this.facade.findNearestParking();
+    const result = this.facade.findNearestParking(userLocation);
     this.cache = result;
     this.cacheTimestamp = now;
     
@@ -223,11 +227,46 @@ class SearchMediator {
 const ParkingSearch = () => {
   const [searching, setSearching] = useState(false);
   const [searchResult, setSearchResult] = useState(null);
-  const [currentStep, setCurrentStep] = useState(0);
-  const [isNavigating, setIsNavigating] = useState(false);
+  const [error, setError] = useState(null);
+  const [backendAvailable, setBackendAvailable] = useState(true);
+  const [useGoogleMaps, setUseGoogleMaps] = useState(true); // Toggle para Google Maps
+  const [userLocation, setUserLocation] = useState(null); // Ubicación del usuario
+  const [selectedLocationName, setSelectedLocationName] = useState('Centro de Cali');
   const mediatorRef = useRef(new SearchMediator());
   const searchProxyRef = useRef(new ParkingSearchProxy(new ParkingSearchFacade()));
-  const animationRef = useRef(null);
+  const gpsAdapterRef = useRef(new GPSAdapter());
+
+  // Ubicaciones predefinidas en Cali
+  const predefinedLocations = [
+    { name: 'Centro de Cali', lat: 3.4516, lng: -76.5319 },
+    { name: 'Ciudad Jardín (Norte)', lat: 3.4680, lng: -76.5150 },
+    { name: 'San Antonio', lat: 3.4520, lng: -76.5380 },
+    { name: 'Sur (Unicentro)', lat: 3.3800, lng: -76.5350 },
+    { name: 'Terminal de Transporte', lat: 3.4200, lng: -76.5000 },
+    { name: 'Chipichape', lat: 3.4800, lng: -76.5400 },
+    { name: 'Granada', lat: 3.4600, lng: -76.5280 },
+    { name: 'Universidad del Valle', lat: 3.3750, lng: -76.5300 },
+  ];
+
+  // Verificar disponibilidad del backend al cargar
+  useEffect(() => {
+    const checkBackend = async () => {
+      const isAvailable = await APIService.checkBackendHealth();
+      setBackendAvailable(isAvailable);
+      if (!isAvailable) {
+        setError('Backend no disponible. Usando datos de demostración.');
+      }
+    };
+    checkBackend();
+    
+    // Verificar si existe la API key de Google Maps
+    const hasGoogleMapsKey = process.env.REACT_APP_GOOGLE_MAPS_API_KEY && 
+                             process.env.REACT_APP_GOOGLE_MAPS_API_KEY !== 'YOUR_GOOGLE_MAPS_API_KEY_HERE';
+    setUseGoogleMaps(hasGoogleMapsKey);
+    
+    // Establecer ubicación inicial (Centro de Cali por defecto)
+    setUserLocation({ lat: 3.4516, lng: -76.5319 });
+  }, []);
 
   // PATRÓN OBSERVER: Suscripción a cambios de disponibilidad
   useEffect(() => {
@@ -252,57 +291,80 @@ const ParkingSearch = () => {
     return () => clearInterval(interval);
   }, [searchResult]);
 
-  // Animación de ruta con velocidad ajustable
-  useEffect(() => {
-    if (isNavigating && searchResult && searchResult.route) {
-      const totalSteps = searchResult.route.length;
-      const duration = 8000; // 8 segundos para completar la ruta
-      const stepDuration = duration / totalSteps;
-      
-      let step = 0;
-      
-      const animate = () => {
-        if (step < totalSteps) {
-          setCurrentStep(step);
-          step++;
-          animationRef.current = setTimeout(animate, stepDuration);
-        } else {
-          setIsNavigating(false);
-        }
-      };
-      
-      animate();
-      
-      return () => {
-        if (animationRef.current) {
-          clearTimeout(animationRef.current);
-        }
-      };
-    }
-  }, [isNavigating, searchResult]);
-
   const handleSearch = async () => {
     setSearching(true);
-    setCurrentStep(0);
-    setIsNavigating(false);
+    setError(null);
     
     mediatorRef.current.notify('SearchButton', 'searchStarted', null);
 
-    setTimeout(() => {
-      const result = searchProxyRef.current.findNearestParking();
+    try {
+      // Usar la ubicación seleccionada por el usuario
+      if (!userLocation) {
+        setError('Por favor selecciona una ubicación');
+        setSearching(false);
+        return;
+      }
+      
+      let result;
+      
+      // Intentar usar el backend si está disponible
+      if (backendAvailable) {
+        try {
+          console.log('🌐 Llamando al backend con ubicación:', userLocation);
+          const apiResult = await APIService.findNearestParking(userLocation);
+          console.log('📦 Respuesta del backend:', apiResult);
+          
+          // Adaptar respuesta del backend al formato del frontend
+          const parking = {
+            id: apiResult.id,
+            name: apiResult.name,
+            lat: apiResult.latitude,
+            lng: apiResult.longitude,
+            available: apiResult.is_available,
+            price: apiResult.price_per_hour,
+            distance: apiResult.distance_km,
+            space: `${String.fromCharCode(65 + Math.floor(Math.random() * 4))}-${Math.floor(Math.random() * 30) + 1}`
+          };
+          
+          console.log('🅿️ Parking adaptado:', parking);
+          
+          // Generar ruta usando el GPS Adapter
+          const route = gpsAdapterRef.current.getRoute(userLocation, parking);
+          
+          result = {
+            parking: parking,
+            userLocation: userLocation,
+            route: route
+          };
+          
+          console.log('✅ Result final:', result);
+        } catch (apiError) {
+          console.warn('⚠️ Error del backend, usando datos locales:', apiError.message);
+          setBackendAvailable(false);
+          setError(`Error del backend: ${apiError.message}. Usando datos locales.`);
+          
+          // Usar datos locales como fallback con la ubicación del usuario
+          result = searchProxyRef.current.findNearestParking(userLocation);
+        }
+      } else {
+        // Usar datos locales si el backend no está disponible
+        console.log('📦 Usando datos locales (backend no disponible)');
+        result = searchProxyRef.current.findNearestParking(userLocation);
+      }
       
       if (result) {
         setSearchResult(result);
         mediatorRef.current.notify('SearchButton', 'searchCompleted', result);
-        
-        // Iniciar navegación automáticamente después de 1 segundo
-        setTimeout(() => {
-          setIsNavigating(true);
-        }, 1000);
+      } else {
+        setError('No se encontraron parqueaderos disponibles');
       }
       
+    } catch (err) {
+      console.error('Error en la búsqueda:', err);
+      setError('Error al buscar parqueadero. Por favor intenta de nuevo.');
+    } finally {
       setSearching(false);
-    }, 1500);
+    }
   };
 
   // PATRÓN DECORATOR: Enriquece la información del parqueadero
@@ -315,83 +377,118 @@ const ParkingSearch = () => {
     };
   };
 
-  // Calcular progreso de la ruta
-  const routeProgress = searchResult && searchResult.route 
-    ? Math.round((currentStep / searchResult.route.length) * 100) 
-    : 0;
+  // Manejador para cambiar la ubicación del usuario
+  const handleLocationChange = (event) => {
+    const location = predefinedLocations.find(loc => loc.name === event.target.value);
+    if (location) {
+      setUserLocation({ lat: location.lat, lng: location.lng });
+      setSelectedLocationName(location.name);
+      setSearchResult(null); // Limpiar resultado anterior
+      setError(null);
+      // Invalidar caché del proxy para forzar nueva búsqueda
+      searchProxyRef.current.invalidateCache();
+    }
+  };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
-      <div className="max-w-6xl mx-auto">
-        <header className="text-center mb-6">
-          <div className="flex items-center justify-center gap-3 mb-2">
-            <Car className="w-10 h-10 text-indigo-600" />
-            <h1 className="text-4xl font-bold text-indigo-900">SmartPark</h1>
+    <div className="min-h-screen p-6">
+      <div className="max-w-7xl mx-auto">
+        <header className="text-center mb-8 animate-in">
+          <div className="flex items-center justify-center gap-4 mb-3">
+            <div className="bg-white p-3 rounded-2xl shadow-lg border">
+              <Car className="w-10 h-10 text-gray-700" />
+            </div>
+            <h1 className="text-5xl font-bold text-gray-900">
+              SmartPark
+            </h1>
           </div>
-          <p className="text-gray-600">Encuentra tu parqueadero más cercano</p>
+          <p className="text-lg text-gray-600 font-medium">Encuentra el parqueadero perfecto en segundos</p>
+          
+          {/* Indicador de estado del backend */}
+          <div className="mt-6 flex items-center justify-center">
+            <div className="status-indicator">
+              <div className={`status-dot ${backendAvailable ? 'online' : 'offline'}`}></div>
+              <span>
+                {backendAvailable ? 'Sistema en línea' : 'Modo demostración'}
+              </span>
+            </div>
+          </div>
+          
+          {/* Mensaje de error */}
+          {error && (
+            <div className="mt-6 max-w-2xl mx-auto">
+              <div className="alert-box warning">
+                <AlertCircle className="w-5 h-5 flex-shrink-0" />
+                <p className="text-sm font-medium">{error}</p>
+              </div>
+            </div>
+          )}
         </header>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Mapa */}
           <div className="lg:col-span-2">
-            <div className="bg-white rounded-2xl shadow-xl overflow-hidden">
-              <div className="relative h-[500px] bg-gradient-to-br from-green-50 to-blue-50">
-                {/* Simulación de mapa */}
+            <div className="glass-card overflow-hidden relative map-container">
+              {/* Toggle para cambiar entre mapas */}
+              <div className="absolute top-4 right-4 z-20">
+                <button
+                  onClick={() => setUseGoogleMaps(!useGoogleMaps)}
+                  className="glass-card p-2 text-sm font-semibold text-gray-700 hover:shadow-lg transition-all"
+                >
+                  {useGoogleMaps ? '🗺️ Mapa Simple' : '🌍 Google Maps'}
+                </button>
+              </div>
+
+              {useGoogleMaps ? (
+                /* Google Maps Real */
+                <div className="relative">
+                  <GoogleMapsComponent
+                    searchResult={searchResult}
+                    userLocation={userLocation}
+                  />
+                  
+                  {/* Overlay de búsqueda */}
+                  {searching && (
+                    <div className="absolute inset-0 bg-white/95 backdrop-blur-md flex items-center justify-center z-30">
+                      <div className="text-center glass-card p-8 rounded-3xl">
+                        <div className="modern-loader mx-auto mb-4"></div>
+                        <p className="text-gray-900 font-bold text-xl mb-2">Buscando parqueadero</p>
+                        <p className="text-gray-600 text-sm">Analizando disponibilidad en tiempo real</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                /* Mapa SVG Simple */
+              <div className="relative h-[600px] bg-gray-100">
                 <svg className="w-full h-full" viewBox="0 0 800 500">
                   <defs>
                     <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
                       <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#e2e8f0" strokeWidth="0.5"/>
                     </pattern>
-                    
-                    {/* Gradiente para la ruta */}
-                    <linearGradient id="routeGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-                      <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.9" />
-                      <stop offset="100%" stopColor="#8b5cf6" stopOpacity="0.9" />
-                    </linearGradient>
-                    
-                    {/* Patrón para carreteras */}
-                    <pattern id="roadPattern" x="0" y="0" width="20" height="4" patternUnits="userSpaceOnUse">
-                      <rect x="0" y="0" width="12" height="4" fill="white" opacity="0.8"/>
-                    </pattern>
                   </defs>
                   
-                  <rect width="800" height="500" fill="#f0fdf4" />
+                  <rect width="800" height="500" fill="#f8fafc" />
                   <rect width="800" height="500" fill="url(#grid)" />
 
-                  {/* Carreteras principales */}
+                  {/* Carreteras simples */}
                   <g>
-                    {/* Carretera horizontal principal */}
-                    <rect x="0" y="235" width="800" height="30" fill="#64748b" opacity="0.4"/>
-                    <rect x="0" y="240" width="800" height="20" fill="#475569"/>
-                    <rect x="0" y="248" width="800" height="4" fill="url(#roadPattern)"/>
-                    
-                    {/* Carretera vertical principal */}
-                    <rect x="385" y="0" width="30" height="500" fill="#64748b" opacity="0.4"/>
-                    <rect x="390" y="0" width="20" height="500" fill="#475569"/>
-                    <line x1="400" y1="0" x2="400" y2="500" stroke="url(#roadPattern)" strokeWidth="4" strokeDasharray="20,15"/>
-                    
-                    {/* Carreteras secundarias */}
-                    <rect x="0" y="118" width="800" height="16" fill="#64748b" opacity="0.3"/>
-                    <rect x="0" y="120" width="800" height="12" fill="#64748b"/>
-                    
-                    <rect x="0" y="358" width="800" height="16" fill="#64748b" opacity="0.3"/>
-                    <rect x="0" y="360" width="800" height="12" fill="#64748b"/>
-                    
-                    <rect x="198" y="0" width="16" height="500" fill="#64748b" opacity="0.3"/>
-                    <rect x="200" y="0" width="12" height="500" fill="#64748b"/>
-                    
-                    <rect x="588" y="0" width="16" height="500" fill="#64748b" opacity="0.3"/>
-                    <rect x="590" y="0" width="12" height="500" fill="#64748b"/>
+                    <rect x="0" y="240" width="800" height="20" fill="#64748b" rx="2"/>
+                    <rect x="390" y="0" width="20" height="500" fill="#64748b" rx="2"/>
+                    <rect x="0" y="120" width="800" height="12" fill="#94a3b8" rx="2"/>
+                    <rect x="0" y="360" width="800" height="12" fill="#94a3b8" rx="2"/>
+                    <rect x="200" y="0" width="12" height="500" fill="#94a3b8" rx="2"/>
+                    <rect x="590" y="0" width="12" height="500" fill="#94a3b8" rx="2"/>
                   </g>
                   
-                  {/* Áreas verdes (parques) */}
-                  <g opacity="0.3">
-                    <rect x="50" y="50" width="120" height="60" fill="#22c55e" rx="5"/>
-                    <rect x="630" y="380" width="140" height="90" fill="#22c55e" rx="5"/>
-                    <circle cx="550" cy="80" r="40" fill="#22c55e"/>
+                  {/* Parques */}
+                  <g opacity="0.4">
+                    <rect x="50" y="50" width="120" height="60" fill="#10b981" rx="8"/>
+                    <rect x="630" y="380" width="140" height="90" fill="#10b981" rx="8"/>
+                    <circle cx="550" cy="80" r="40" fill="#10b981"/>
                   </g>
 
-                  {/* Usuario - Punto de origen (ESQUINA INFERIOR IZQUIERDA) */}
+                  {/* Usuario */}
                   {searchResult && (
                     <g>
                       {(() => {
@@ -399,14 +496,8 @@ const ParkingSearch = () => {
                         const userY = 250 - (searchResult.userLocation.lat - 3.4516) * 15000;
                         return (
                           <>
-                            <circle cx={userX} cy={userY} r="18" fill="#3b82f6" stroke="white" strokeWidth="4">
-                              <animate attributeName="r" values="18;22;18" dur="2s" repeatCount="indefinite" />
-                            </circle>
-                            <circle cx={userX} cy={userY} r="35" fill="#3b82f6" opacity="0.3">
-                              <animate attributeName="r" values="35;50;35" dur="2s" repeatCount="indefinite" />
-                              <animate attributeName="opacity" values="0.3;0;0.3" dur="2s" repeatCount="indefinite" />
-                            </circle>
-                            <text x={userX} y={userY + 35} textAnchor="middle" className="text-base font-bold" fill="#1e40af" fontSize="14">
+                            <circle cx={userX} cy={userY} r="16" fill="#2563eb" stroke="white" strokeWidth="3"/>
+                            <text x={userX} y={userY + 35} textAnchor="middle" className="text-sm font-semibold" fill="#2563eb">
                               Tu ubicación
                             </text>
                           </>
@@ -415,7 +506,7 @@ const ParkingSearch = () => {
                     </g>
                   )}
 
-                  {/* Ruta completa (transparente) */}
+                  {/* Ruta simple */}
                   {searchResult && searchResult.route.map((point, idx, arr) => {
                     if (idx === 0) return null;
                     const prev = arr[idx - 1];
@@ -427,221 +518,117 @@ const ParkingSearch = () => {
                     return (
                       <line 
                         key={`route-${idx}`}
-                        x1={x1} 
-                        y1={y1} 
-                        x2={x2} 
-                        y2={y2} 
-                        stroke="#94a3b8" 
-                        strokeWidth="8"
-                        strokeLinecap="round"
-                        strokeDasharray="12,6"
-                        opacity="0.5"
+                        x1={x1} y1={y1} x2={x2} y2={y2} 
+                        stroke="#2563eb" strokeWidth="4" strokeLinecap="round"
                       />
                     );
                   })}
 
-                  {/* Ruta recorrida (coloreada) */}
-                  {searchResult && searchResult.route.slice(0, currentStep + 1).map((point, idx, arr) => {
-                    if (idx === 0) return null;
-                    const prev = arr[idx - 1];
-                    const x1 = 400 + (prev.lng + 76.5319) * 15000;
-                    const y1 = 250 - (prev.lat - 3.4516) * 15000;
-                    const x2 = 400 + (point.lng + 76.5319) * 15000;
-                    const y2 = 250 - (point.lat - 3.4516) * 15000;
-                    
-                    return (
-                      <line 
-                        key={`traveled-${idx}`}
-                        x1={x1} 
-                        y1={y1} 
-                        x2={x2} 
-                        y2={y2} 
-                        stroke="url(#routeGradient)" 
-                        strokeWidth="10"
-                        strokeLinecap="round"
-                      />
-                    );
-                  })}
-
-                  {/* Parqueadero destino (ESQUINA SUPERIOR DERECHA) */}
+                  {/* Parqueadero */}
                   {searchResult && (
                     <g>
                       {(() => {
                         const x = 400 + (searchResult.parking.lng + 76.5319) * 15000;
                         const y = 250 - (searchResult.parking.lat - 3.4516) * 15000;
+                        const isAvailable = searchResult.parking.available || searchResult.parking.is_available;
+                        const color = isAvailable ? '#10b981' : '#ef4444';
                         return (
                           <>
-                            {/* Área del parqueadero */}
-                            <rect 
-                              x={x - 40} 
-                              y={y - 40} 
-                              width="80" 
-                              height="80" 
-                              fill="#10b981" 
-                              opacity="0.2" 
-                              rx="5"
-                            />
-                            
-                            {/* Marcador del parqueadero */}
-                            <circle cx={x} cy={y} r="25" fill="#10b981" stroke="white" strokeWidth="4">
-                              <animate attributeName="r" values="25;30;25" dur="1.5s" repeatCount="indefinite" />
-                            </circle>
-                            
-                            {/* Icono de parqueadero (P) */}
-                            <text 
-                              x={x} 
-                              y={y + 10} 
-                              textAnchor="middle" 
-                              fontSize="28" 
-                              fontWeight="bold" 
-                              fill="white"
-                            >
-                              P
-                            </text>
-                            
-                            {/* Nombre del parqueadero */}
-                            <text x={x} y={y - 50} textAnchor="middle" className="text-base font-bold" fill="#065f46" fontSize="15">
+                            <rect x={x - 20} y={y - 20} width="40" height="40" fill={color} stroke="white" strokeWidth="3" rx="6"/>
+                            <text x={x} y={y + 6} textAnchor="middle" fontSize="18" fontWeight="bold" fill="white">P</text>
+                            <text x={x} y={y - 30} textAnchor="middle" className="text-sm font-semibold" fill={color}>
                               {searchResult.parking.name}
                             </text>
-                            
-                            {/* Espacio específico */}
-                            <g>
-                              <rect 
-                                x={x - 35} 
-                                y={y + 35} 
-                                width="70" 
-                                height="25" 
-                                fill="white" 
-                                stroke="#10b981" 
-                                strokeWidth="2"
-                                rx="4"
-                              />
-                              <text 
-                                x={x} 
-                                y={y + 52} 
-                                textAnchor="middle" 
-                                fontSize="14" 
-                                fontWeight="bold" 
-                                fill="#059669"
-                              >
-                                Espacio {searchResult.parking.space}
-                              </text>
-                            </g>
                           </>
                         );
                       })()}
                     </g>
                   )}
-
-                  {/* Posición actual del vehículo en ruta */}
-                  {searchResult && isNavigating && currentStep > 0 && currentStep < searchResult.route.length && (
-                    (() => {
-                      const point = searchResult.route[currentStep];
-                      const x = 400 + (point.lng + 76.5319) * 15000;
-                      const y = 250 - (point.lat - 3.4516) * 15000;
-                      
-                      // Calcular ángulo de rotación basado en la dirección
-                      let rotation = 0;
-                      if (currentStep > 0) {
-                        const prevPoint = searchResult.route[currentStep - 1];
-                        const dx = point.lng - prevPoint.lng;
-                        const dy = point.lat - prevPoint.lat;
-                        rotation = Math.atan2(dx, dy) * (180 / Math.PI);
-                      }
-                      
-                      return (
-                        <g transform={`translate(${x}, ${y})`}>
-                          {/* Sombra del vehículo */}
-                          <ellipse cx="3" cy="3" rx="18" ry="14" fill="black" opacity="0.3" />
-                          
-                          {/* Vehículo más grande y detallado */}
-                          <g transform={`rotate(${rotation})`}>
-                            <circle cx="0" cy="0" r="16" fill="#ef4444" stroke="white" strokeWidth="3">
-                              <animate attributeName="r" values="16;18;16" dur="0.5s" repeatCount="indefinite" />
-                            </circle>
-                            <circle cx="0" cy="0" r="10" fill="#dc2626" opacity="0.8"/>
-                            {/* Flecha de dirección */}
-                            <path 
-                              d="M -5 -8 L 0 -14 L 5 -8 L 0 -10 Z" 
-                              fill="white"
-                              strokeLinejoin="round"
-                            />
-                          </g>
-                        </g>
-                      );
-                    })()
-                  )}
                 </svg>
 
                 {/* Overlay de búsqueda */}
                 {searching && (
-                  <div className="absolute inset-0 bg-white bg-opacity-80 flex items-center justify-center backdrop-blur-sm">
-                    <div className="text-center">
-                      <Loader className="w-16 h-16 text-indigo-600 animate-spin mx-auto mb-4" />
-                      <p className="text-gray-700 font-semibold text-lg">Buscando parqueadero cercano...</p>
-                      <p className="text-gray-500 text-sm mt-2">Analizando disponibilidad en tiempo real</p>
-                    </div>
-                  </div>
-                )}
-
-                {/* Indicador de progreso de navegación */}
-                {isNavigating && searchResult && (
-                  <div className="absolute top-4 left-4 right-4">
-                    <div className="bg-white rounded-lg shadow-lg p-4">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-sm font-semibold text-gray-700">Navegando hacia {searchResult.parking.name}</span>
-                        <span className="text-sm font-bold text-indigo-600">{routeProgress}%</span>
-                      </div>
-                      <div className="w-full bg-gray-200 rounded-full h-2">
-                        <div 
-                          className="bg-gradient-to-r from-indigo-500 to-purple-500 h-2 rounded-full transition-all duration-300"
-                          style={{ width: `${routeProgress}%` }}
-                        />
-                      </div>
+                  <div className="absolute inset-0 bg-white bg-opacity-90 flex items-center justify-center">
+                    <div className="text-center glass-card p-6">
+                      <div className="modern-loader mx-auto mb-4"></div>
+                      <p className="text-gray-900 font-semibold">Buscando parqueadero</p>
+                      <p className="text-gray-600 text-sm">Analizando disponibilidad</p>
                     </div>
                   </div>
                 )}
               </div>
+              )}
             </div>
           </div>
 
           {/* Panel de información */}
-          <div className="space-y-4">
+          <div className="space-y-5">
+            {/* Selector de ubicación */}
+            <div className="glass-card p-6 animate-in">
+              <label className="block text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                <div className="p-1 bg-gray-100 rounded">
+                  <MapPin className="w-4 h-4 text-gray-600" />
+                </div>
+                Tu ubicación
+              </label>
+              <select
+                value={selectedLocationName}
+                onChange={handleLocationChange}
+                className="modern-select"
+              >
+                {predefinedLocations.map((location) => (
+                  <option key={location.name} value={location.name}>
+                    {location.name}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-gray-500 mt-3 flex items-center gap-2">
+                <span>💡</span>
+                <span>Cambia tu ubicación para explorar parqueaderos cercanos</span>
+              </p>
+            </div>
+
             <button
               onClick={handleSearch}
-              disabled={searching || isNavigating}
-              className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 text-white py-4 rounded-xl font-semibold text-lg shadow-lg hover:shadow-xl transform hover:scale-105 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none flex items-center justify-center gap-2"
+              disabled={searching}
+              className="modern-button w-full py-4"
             >
-              <Navigation className="w-5 h-5" />
-              {isNavigating ? 'Navegando...' : 'Buscar Parqueadero Cercano'}
+              {searching ? (
+                <>
+                  <div className="modern-loader"></div>
+                  <span>Buscando...</span>
+                </>
+              ) : (
+                <>
+                  <Navigation className="w-5 h-5" />
+                  <span>Buscar Parqueadero</span>
+                </>
+              )}
             </button>
 
             {searchResult && (
-              <div className="bg-white rounded-2xl shadow-xl p-6 space-y-4">
+              <div className="glass-card p-6 space-y-4 animate-in">
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
-                    <h3 className="text-xl font-bold text-gray-900 mb-2">
+                    <h3 className="text-2xl font-bold text-gray-900 mb-3">
                       {searchResult.parking.name}
                     </h3>
                     <div className="flex items-center gap-2">
-                      <div className={`px-3 py-1 rounded-full text-sm font-medium ${
-                        searchResult.parking.available 
-                          ? 'bg-green-100 text-green-700' 
-                          : 'bg-red-100 text-red-700'
-                      }`}>
-                        {searchResult.parking.available ? '✓ Disponible' : '✗ Ocupado'}
+                      <div className={`status-badge ${searchResult.parking.available ? 'available' : 'unavailable'}`}>
+                        <span>{searchResult.parking.available ? '✓' : '✗'}</span>
+                        {searchResult.parking.available ? 'Disponible' : 'Ocupado'}
                       </div>
                     </div>
                   </div>
-                  <div className="bg-indigo-100 p-3 rounded-xl">
-                    <MapPin className="w-6 h-6 text-indigo-600" />
+                  <div className="bg-white p-3 rounded-xl shadow-lg border">
+                    <MapPin className="w-6 h-6 text-gray-700" />
                   </div>
                 </div>
 
                 {!searchResult.parking.available && (
-                  <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg p-3">
-                    <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
-                    <p className="text-sm text-amber-800">
+                  <div className="alert-box warning">
+                    <AlertCircle className="w-5 h-5 text-amber-700 flex-shrink-0" />
+                    <p className="text-sm text-amber-900 font-medium">
                       Este parqueadero acaba de ocuparse. Presiona "Buscar" nuevamente para encontrar otra opción.
                     </p>
                   </div>
@@ -650,42 +637,53 @@ const ParkingSearch = () => {
                 {(() => {
                   const enriched = getEnrichedParkingInfo(searchResult.parking);
                   return (
-                    <div className="space-y-3 border-t pt-4">
-                      <div className="flex items-center gap-3 text-gray-700">
-                        <MapPin className="w-5 h-5 text-indigo-600 flex-shrink-0" />
-                        <div>
-                          <span className="font-medium">{enriched.distance} km de distancia</span>
-                          <div className="text-sm text-indigo-600 font-semibold mt-1">
-                            📍 Espacio asignado: {enriched.space}
-                          </div>
+                    <div className="space-y-3 pt-4">
+                      <div className="info-item">
+                        <div className="info-item-icon">
+                          <MapPin className="w-4 h-4" />
+                        </div>
+                        <div className="flex-1">
+                          <div className="text-sm text-gray-600">Distancia</div>
+                          <div className="font-semibold text-gray-900">{enriched.distance} km</div>
+                          <div className="text-xs text-gray-500">Espacio: {enriched.space}</div>
                         </div>
                       </div>
                       
-                      <div className="flex items-center gap-3 text-gray-700">
-                        <Clock className="w-5 h-5 text-indigo-600 flex-shrink-0" />
-                        <span className="font-medium">{enriched.estimatedTime} min estimados</span>
+                      <div className="info-item">
+                        <div className="info-item-icon">
+                          <Clock className="w-4 h-4" />
+                        </div>
+                        <div className="flex-1">
+                          <div className="text-sm text-gray-600">Tiempo estimado</div>
+                          <div className="font-semibold text-gray-900">{enriched.estimatedTime} min</div>
+                        </div>
                       </div>
                       
-                      <div className="flex items-center gap-3 text-gray-700">
-                        <DollarSign className="w-5 h-5 text-indigo-600 flex-shrink-0" />
-                        <span className="font-medium">${enriched.price} COP/hora</span>
+                      <div className="info-item">
+                        <div className="info-item-icon">
+                          <DollarSign className="w-4 h-4" />
+                        </div>
+                        <div className="flex-1">
+                          <div className="text-sm text-gray-600">Precio por hora</div>
+                          <div className="font-semibold text-gray-900">${enriched.price} COP</div>
+                        </div>
                       </div>
 
-                      <div className="pt-3 border-t">
-                        <p className="text-sm font-medium text-gray-600 mb-2">Características:</p>
-                        <div className="flex flex-wrap gap-2">
+                      <div className="pt-3">
+                        <p className="text-sm font-semibold text-gray-700 mb-2">Características:</p>
+                        <div className="flex flex-wrap gap-1">
                           {enriched.features.map((feature, idx) => (
-                            <span key={idx} className="px-3 py-1 bg-indigo-50 text-indigo-700 text-xs rounded-lg font-medium">
+                            <span key={idx} className="feature-tag">
                               {feature}
                             </span>
                           ))}
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2 pt-2">
-                        <div className="flex items-center">
+                      <div className="flex items-center gap-2 pt-3 bg-gray-50 p-3 rounded-lg">
+                        <div className="flex">
                           {[1,2,3,4,5].map((star) => (
-                            <span key={star} className="text-yellow-400 text-lg">★</span>
+                            <span key={star} className="text-yellow-400">★</span>
                           ))}
                         </div>
                         <span className="font-semibold text-gray-900">{enriched.rating}</span>
@@ -694,24 +692,6 @@ const ParkingSearch = () => {
                     </div>
                   );
                 })()}
-
-                {isNavigating && (
-                  <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-4 border-2 border-indigo-200 mt-4">
-                    <div className="flex items-center gap-3">
-                      <div className="bg-indigo-600 rounded-full p-2">
-                        <Navigation className="w-5 h-5 text-white" />
-                      </div>
-                      <div className="flex-1">
-                        <p className="text-sm font-semibold text-indigo-900">
-                          Navegación activa
-                        </p>
-                        <p className="text-xs text-indigo-700">
-                          {routeProgress}% del recorrido completado
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                )}
               </div>
             )}
           </div>

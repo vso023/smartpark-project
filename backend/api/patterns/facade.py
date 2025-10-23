@@ -85,7 +85,9 @@ class ParkingSearchFacade:
         return {
             'id': parking.id,
             'name': parking.name,
-            'location': {
+            'latitude': parking.latitude,  # Directo en nivel superior
+            'longitude': parking.longitude,  # Directo en nivel superior
+            'location': {  # También mantener para compatibilidad
                 'lat': parking.latitude,
                 'lng': parking.longitude
             },
