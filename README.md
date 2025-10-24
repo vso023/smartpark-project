@@ -2,6 +2,19 @@
 
 Sistema completo con frontend React y backend Django que implementa patrones de diseño para búsqueda inteligente de parqueaderos.
 
+## 🎨 Patrones de Diseño Implementados
+
+La implementación de patrones se encuentra en backend/api/patterns
+
+### Backend
+- **Singleton**: Gestión única de caché y observadores
+- **Facade**: Interfaz simplificada para búsqueda compleja
+- **Proxy**: Caché y rate limiting de búsquedas
+- **Observer**: Notificaciones de cambios de disponibilidad
+- **Mediator**: Coordinación entre componentes
+- **Adapter**: Traduce y normaliza interfaces externas a la interfaz interna del sistema.
+
+
 ## ✨ Características Principales
 
 - 🗺️ **Integración con Google Maps** - Mapa real con rutas calculadas por Google Directions API
@@ -57,16 +70,13 @@ Este script inicia ambos servidores automáticamente en terminales separadas.
    python add_parkings.py
    ```
 
-5. **Crear superusuario (opcional, para admin):**
+5. **Activar el entorno virtual:**
    ```powershell
-   python manage.py createsuperuser
-   ```
-
-6. **Activar el entorno virtual:**
-   ```powershell
+   .\venv\Scripts\Activate.ps1
+   o
    .\venv\Scripts\activate
    ```
-7. **Iniciar el servidor backend:**
+6. **Iniciar el servidor backend:**
    ```powershell
    python manage.py runserver
    ```
@@ -151,22 +161,8 @@ Content-Type: application/json
 GET http://localhost:8000/api/search/history/
 ```
 
-## 🎨 Patrones de Diseño Implementados
 
-### Backend
-- **Singleton**: Gestión única de caché y observadores
-- **Facade**: Interfaz simplificada para búsqueda compleja
-- **Proxy**: Caché y rate limiting de búsquedas
-- **Observer**: Notificaciones de cambios de disponibilidad
-- **Mediator**: Coordinación entre componentes
 
-### Frontend
-- **Observer**: Actualizaciones en tiempo real de disponibilidad
-- **Singleton**: Gestión única de datos de parqueaderos (fallback)
-- **Adapter**: Adaptación de servicios GPS externos
-- **Facade**: Interfaz simplificada para búsqueda
-- **Proxy**: Caché de búsquedas locales
-- **Mediator**: Coordinación entre componentes UI
 
 ## 🛠️ Tecnologías
 
@@ -219,27 +215,6 @@ smartpark-project/
     ├── package.json
     └── .env                    # Variables de entorno (IMPORTANTE)
 ```
-
-## 🐛 Solución de Problemas
-
-### El frontend no se conecta al backend
-1. Verifica que el backend esté corriendo en `http://localhost:8000`
-2. Revisa que el archivo `.env` tenga: `REACT_APP_API_URL=http://localhost:8000/api`
-3. Reinicia el servidor de React después de cambiar `.env`
-
-### Error de CORS
-- El backend ya tiene CORS configurado para desarrollo
-- Si aún hay problemas, verifica `CORS_ALLOW_ALL_ORIGINS = True` en `settings.py`
-
-### No hay parqueaderos en la búsqueda
-1. Ejecuta el script de población: `python add_parkings.py`
-2. Verifica en el admin: `http://localhost:8000/admin`
-3. Asegúrate de haber ejecutado las migraciones: `python manage.py migrate`
-
-### Errores con Google Maps
-1. Verifica que tengas una API key válida en `frontend/.env`
-2. Asegúrate de haber habilitado "Maps JavaScript API" y "Directions API" en Google Cloud Console
-3. Si ves el mensaje "Google Maps API Key Requerida", configura tu API key
 
 ## 📦 Dependencias
 
@@ -295,7 +270,3 @@ python manage.py runserver
 cd frontend
 npm start
 ```
-
----
-
-**Nota**: El proyecto está configurado para desarrollo. Para producción, se requieren configuraciones adicionales de seguridad y optimización.
