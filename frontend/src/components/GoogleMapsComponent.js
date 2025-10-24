@@ -74,6 +74,7 @@ const GoogleMapsComponent = ({
   const [map, setMap] = useState(null);
   const [directions, setDirections] = useState(null);
   const [selectedMarker, setSelectedMarker] = useState(null);
+  const [isApiLoaded, setIsApiLoaded] = useState(false);
   const apiKey = process.env.REACT_APP_GOOGLE_MAPS_API_KEY;
 
   // Centro del mapa basado en la ubicación del usuario o por defecto
@@ -102,16 +103,18 @@ const GoogleMapsComponent = ({
   // Cargar el mapa
   const onLoad = useCallback((map) => {
     setMap(map);
+    setIsApiLoaded(true);
     if (onMapLoad) onMapLoad(map);
   }, [onMapLoad]);
 
   const onUnmount = useCallback(() => {
     setMap(null);
+    setIsApiLoaded(false);
   }, []);
 
   // Calcular ruta cuando hay resultado de búsqueda
   useEffect(() => {
-    if (searchResult && map && window.google) {
+    if (searchResult && searchResult.userLocation && searchResult.parking && map && isApiLoaded) {
       const directionsService = new window.google.maps.DirectionsService();
       
       // Manejar tanto lat/lng como latitude/longitude
@@ -154,7 +157,7 @@ const GoogleMapsComponent = ({
         }
       );
     }
-  }, [searchResult, map]);
+  }, [searchResult, map, isApiLoaded]);
 
   // Validar API key
   if (!apiKey || apiKey === 'YOUR_GOOGLE_MAPS_API_KEY_HERE') {
@@ -193,7 +196,11 @@ const GoogleMapsComponent = ({
 
   return (
     <div className="relative w-full h-[600px]">
-      <LoadScript googleMapsApiKey={apiKey}>
+      <LoadScript 
+        googleMapsApiKey={apiKey}
+        onLoad={() => setIsApiLoaded(true)}
+        onError={() => setIsApiLoaded(false)}
+      >
         <GoogleMap
           mapContainerStyle={mapContainerStyle}
           center={mapCenter}
@@ -203,10 +210,10 @@ const GoogleMapsComponent = ({
           options={mapOptions}
         >
         {/* Marcador de ubicación del usuario - mostrar siempre si tenemos userLocation */}
-        {window.google && (userLocation || searchResult) && (
+        {isApiLoaded && (userLocation || (searchResult && searchResult.userLocation)) && (
           <Marker
             position={
-              searchResult 
+              searchResult && searchResult.userLocation
                 ? {
                     lat: searchResult.userLocation.lat || searchResult.userLocation.latitude,
                     lng: searchResult.userLocation.lng || searchResult.userLocation.longitude
@@ -239,7 +246,7 @@ const GoogleMapsComponent = ({
         )}
 
         {/* Marcador del parqueadero */}
-        {window.google && searchResult && searchResult.parking && (
+        {isApiLoaded && searchResult && searchResult.parking && (
           (() => {
             const parkingLat = searchResult.parking.lat || searchResult.parking.latitude;
             const parkingLng = searchResult.parking.lng || searchResult.parking.longitude;
@@ -285,7 +292,7 @@ const GoogleMapsComponent = ({
         )}
 
         {/* Información del parqueadero */}
-        {selectedMarker === 'parking' && searchResult && searchResult.parking && (
+        {selectedMarker === 'parking' && isApiLoaded && searchResult && searchResult.parking && (
           <InfoWindow
             position={{
               lat: searchResult.parking.lat || searchResult.parking.latitude,
@@ -356,7 +363,7 @@ const GoogleMapsComponent = ({
         )}
 
         {/* Información del usuario */}
-        {selectedMarker === 'user' && searchResult && (
+        {selectedMarker === 'user' && isApiLoaded && searchResult && searchResult.userLocation && (
           <InfoWindow
             position={{
               lat: searchResult.userLocation.lat || searchResult.userLocation.latitude,
