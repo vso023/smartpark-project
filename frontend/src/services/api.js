@@ -10,6 +10,9 @@ class APIService {
    */
   async findNearestParking(location, filters = {}) {
     try {
+      console.log('🔍 Enviando petición al backend:', `${API_BASE_URL}/search/nearest/`);
+      console.log('📍 Datos enviados:', { latitude: location.lat, longitude: location.lng, filters });
+      
       const response = await fetch(`${API_BASE_URL}/search/nearest/`, {
         method: 'POST',
         headers: {

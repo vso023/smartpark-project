@@ -352,16 +352,54 @@ const SmartParkApp = () => {
     setError(null);
 
     try {
-      console.log('🏠 Forzando búsqueda local para debug...');
-      const result = await findNearestParkingLocally(userLocation);
+      console.log('� Intentando búsqueda en backend...');
+      let result = null;
+      try {
+        // Intentar primero con el backend
+        result = await APIService.findNearestParking(userLocation);
+        console.log('📡 Respuesta del backend:', result);
+      } catch (backendError) {
+        console.warn('⚠️ Petición al backend falló, usando búsqueda local como fallback', backendError);
+        // Fallback a búsqueda local si el backend falla o no responde
+        result = await findNearestParkingLocally(userLocation);
+      }
 
       console.log('📊 Resultado completo:', result);
 
+      // Normalizar respuesta: soportar formato local { parking, route, ... }
+      // y formato backend (parking plano con campos id/name/latitude...)
+      let normalizedResult = null;
       if (result && result.parking) {
+        normalizedResult = result;
+      } else if (result && (result.id || result.name || result.latitude || result.latitude === 0)) {
+        // Backend devuelve un objeto enriquecido; mapearlo a la estructura esperada
+        normalizedResult = {
+          parking: {
+            id: result.id,
+            name: result.name,
+            lat: result.latitude || result.location?.lat,
+            lng: result.longitude || result.location?.lng,
+            available: result.is_available,
+            price_per_hour: result.price_per_hour || result.price,
+            capacity: result.capacity,
+            available_spaces: result.available_spaces || Math.max(0, Math.floor((result.capacity || 0) * 0.5)),
+            features: result.features || [],
+            rating: result.rating || null,
+            estimated_time_minutes: result.estimated_time_minutes || null
+          },
+          userLocation: userLocation,
+          route: result.route || null,
+          alternatives: result.alternatives || [],
+          searchTimestamp: new Date().toISOString(),
+          searchLocation: selectedLocationName
+        };
+      }
+
+      if (normalizedResult && normalizedResult.parking) {
         console.log('✅ Estableciendo resultado exitoso');
-        setSearchResult(result);
+        setSearchResult(normalizedResult);
         // Agregar al historial
-        addToHistory(result);
+        addToHistory(normalizedResult);
       } else {
         console.log('❌ Resultado vacío o sin parking');
         setError('No se encontraron parqueaderos disponibles en esta zona');

@@ -107,14 +107,11 @@ class ParkingSearchFacade:
             {'lat': nearest['parking'].latitude, 'lng': nearest['parking'].longitude}
         )
 
-        # 6. PATRÓN DECORATOR: Enriquecer información
         enriched_data = self._enrich_parking_data(nearest['parking'], nearest['distance'], route)
 
         return enriched_data
 
     def _enrich_parking_data(self, parking, distance, route):
-        """PATRÓN DECORATOR - Enriquece los datos básicos del parqueadero"""
-        print("🎨 DECORATOR: Enriqueciendo información del parqueadero")
 
         # Generar espacio aleatorio
         import random
@@ -136,7 +133,7 @@ class ParkingSearchFacade:
             'features': parking.features,
             'route': route,
             'space': space,
-            # Información adicional calculada (DECORATOR)
+            # Información adicional calculada 
             'estimated_time_minutes': route['duration_minutes'] if route else None,
             'estimated_cost': float(parking.price_per_hour) * 2,
             'rating': round(4 + (hash(parking.name) % 10) / 10, 1),
